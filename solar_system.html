@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 太阳系模型 - 性能优化版</title>
+    <style>
+        /* ==================== CSS 样式 - 太空科幻风格 ==================== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            background: #000011;
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            color: #fff;
+        }
+
+        /* Three.js 容器 */
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 行星标签（CSS2DRenderer） */
+        .planet-label {
+            color: #4fc3f7;
+            font-size: 14px;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(79, 195, 247, 0.8);
+            pointer-events: none;
+            user-select: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            background: rgba(0, 20, 40, 0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(79, 195, 247, 0.3);
+        }
+
+        .planet-label.visible {
+            opacity: 1;
+        }
+
+        /* 信息面板 */
+        #info-panel {
+            position: absolute;
+            top: 20px;
+            right: -350px;
+            width: 320px;
+            background: linear-gradient(135deg, rgba(10, 30, 60, 0.95), rgba(5, 15, 30, 0.98));
+            border: 1px solid rgba(79, 195, 247, 0.3);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(79, 195, 247, 0.2);
+            transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }
+
+        #info-panel.active {
+            right: 20px;
+        }
+
+        #info-panel h2 {
+            color: #4fc3f7;
+            font-size: 24px;
+            margin-bottom: 15px;
+            text-shadow: 0 0 15px rgba(79, 195, 247, 0.6);
+            border-bottom: 1px solid rgba(79, 195, 247, 0.3);
+            padding-bottom: 10px;
+        }
+
+        #info-panel p {
+            color: #b0bec5;
+            line-height: 1.6;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        #info-panel .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: transparent;
+            border: none;
+            color: #4fc3f7;
+            font-size: 24px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        #info-panel .close-btn:hover {
+            color: #fff;
+            transform: scale(1.2);
+        }
+
+        /* 底部控制栏 */
+        #controls-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            z-index: 100;
+        }
+
+        .control-btn {
+            background: linear-gradient(135deg, rgba(10, 30, 60, 0.9), rgba(5, 15, 30, 0.95));
+            border: 1px solid rgba(79, 195, 247, 0.3);
+            color: #4fc3f7;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+
+        .control-btn:hover {
+            background: rgba(79, 195, 247, 0.2);
+            border-color: #4fc3f7;
+            color: #fff;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 195, 247, 0.3);
+        }
+
+        .control-btn:active {
+            transform: translateY(0);
+        }
+
+        /* FPS 显示 */
+        #fps-counter {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #4fc3f7;
+            font-size: 12px;
+            background: rgba(0, 20, 40, 0.7);
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(79, 195, 247, 0.3);
+            z-index: 100;
+        }
+
+        /* 标题 */
+        #title {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #4fc3f7;
+            font-size: 28px;
+            font-weight: bold;
+            text-shadow: 0 0 20px rgba(79, 195, 247, 0.6);
+            letter-spacing: 3px;
+            z-index: 100;
+            pointer-events: none;
+        }
+    </style>
+
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <!-- Three.js 渲染容器 -->
+    <div id="canvas-container"></div>
+
+    <!-- 标题 -->
+    <div id="title">太阳系探索</div>
+
+    <!-- FPS 计数器 -->
+    <div id="fps-counter">FPS: --</div>
+
+    <!-- 行星标签容器（由 CSS2DRenderer 管理） -->
+    <div id="labels-container"></div>
+
+    <!-- 信息面板 -->
+    <div id="info-panel">
+        <button class="close-btn" onclick="closeInfoPanel()">×</button>
+        <h2 id="planet-name">行星名称</h2>
+        <p id="planet-info">行星信息</p>
+    </div>
+
+    <!-- 底部控制栏 -->
+    <div id="controls-bar">
+        <button class="control-btn" onclick="resetCamera()">重置视角</button>
+        <button class="control-btn" onclick="changeSpeed(0.5)">减速</button>
+        <button class="control-btn" onclick="changeSpeed(2.0)">加速</button>
+    </div>
+
+    <script type="module">
+        // ==================== 性能降级开关 ====================
+        // 设置为 true 可进一步降低性能需求（减少粒子、关闭小行星带等）
+        const performanceMode = false;
+
+        // ==================== 导入 Three.js 模块 ====================
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // ==================== 全局变量 ====================
+        let scene, camera, renderer, labelRenderer, controls;
+        let planets = []; // 存储行星对象及其数据
+        let asteroidBelt, coronaParticles, starField;
+        let speedMultiplier = 1.0;
+        let hoveredPlanet = null;
+        let raycaster, mouse;
+        let labels = {}; // 存储行星标签元素
+
+        // 行星数据（简化比例，注重视觉效果而非真实比例）
+        const planetData = [
+            { name: '水星', nameEn: 'Mercury', radius: 0.4, distance: 10, color: 0xb5b5b5, speed: 4.1, info: '水星：离太阳最近的行星，温差极大。' },
+            { name: '金星', nameEn: 'Venus', radius: 0.9, distance: 15, color: 0xffc649, speed: 1.6, info: '金星：最亮的行星，拥有浓厚的大气层。' },
+            { name: '地球', nameEn: 'Earth', radius: 1, distance: 20, color: 0x6b93d6, speed: 1.0, info: '地球：我们的家园，唯一已知存在生命的星球。' },
+            { name: '火星', nameEn: 'Mars', radius: 0.5, distance: 25, color: 0xc1440e, speed: 0.53, info: '火星：红色星球，人类探索的下一个目标。' },
+            { name: '木星', nameEn: 'Jupiter', radius: 2.5, distance: 35, color: 0xd8ca9d, speed: 0.08, info: '木星：太阳系最大的行星，拥有著名的大红斑。' },
+            { name: '土星', nameEn: 'Saturn', radius: 2.2, distance: 45, color: 0xead6b8, speed: 0.03, hasRing: true, info: '土星：拥有美丽的光环系统。' },
+            { name: '天王星', nameEn: 'Uranus', radius: 1.6, distance: 55, color: 0xd1e7e7, speed: 0.01, info: '天王星：冰巨星，自转轴几乎躺在轨道平面上。' },
+            { name: '海王星', nameEn: 'Neptune', radius: 1.5, distance: 65, color: 0x5b5ddf, speed: 0.006, info: '海王星：最远的行星，风暴强烈。' }
+        ];
+
+        // ==================== 初始化场景 ====================
+        function init() {
+            // 创建场景
+            scene = new THREE.Scene();
+
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 50, 80);
+
+            // 创建 WebGL 渲染器（禁用抗锯齿以提升性能）
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: false, // 性能优化：禁用抗锯齿
+                powerPreference: 'high-performance'
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 限制像素比
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // 创建 CSS2D 渲染器（用于 HTML 标签）
+            labelRenderer = new CSS2DRenderer();
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0';
+            labelRenderer.domElement.style.pointerEvents = 'none'; // 不拦截鼠标事件
+            document.getElementById('canvas-container').appendChild(labelRenderer.domElement);
+
+            // 创建轨道控制器
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 20;
+            controls.maxDistance = 200;
+
+            // 初始化射线检测
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // 添加光源
+            addLights();
+
+            // 创建天体
+            createSun();
+            createPlanets();
+            createAsteroidBelt();
+            createStarField();
+
+            // 添加事件监听
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('click', onClick);
+
+            // 开始动画循环
+            animate();
+
+            // 启动 FPS 计数器
+            updateFPS();
+        }
+
+        // ==================== 添加光源 ====================
+        function addLights() {
+            // 太阳光（点光源）
+            const sunLight = new THREE.PointLight(0xffffff, 2, 300);
+            sunLight.position.set(0, 0, 0);
+            scene.add(sunLight);
+
+            // 环境光（基础照明）
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            scene.add(ambientLight);
+        }
+
+        // ==================== 创建太阳 ====================
+        function createSun() {
+            // 太阳本体
+            const sunGeometry = new THREE.SphereGeometry(5, 32, 32);
+            const sunMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xffdd00,
+                emissive: 0xffaa00
+            });
+            const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+            scene.add(sun);
+
+            // 日冕粒子（简化版：单层稀疏粒子）
+            const particleCount = performanceMode ? 150 : 250;
+            const coronaGeometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount; i++) {
+                const angle1 = Math.random() * Math.PI * 2;
+                const angle2 = Math.random() * Math.PI;
+                const radius = 6 + Math.random() * 2;
+
+                positions[i * 3] = radius * Math.sin(angle2) * Math.cos(angle1);
+                positions[i * 3 + 1] = radius * Math.sin(angle2) * Math.sin(angle1);
+                positions[i * 3 + 2] = radius * Math.cos(angle2);
+            }
+
+            coronaGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const coronaMaterial = new THREE.PointsMaterial({
+                color: 0xffaa00,
+                size: 0.3,
+                transparent: true,
+                opacity: 0.6
+            });
+
+            coronaParticles = new THREE.Points(coronaGeometry, coronaMaterial);
+            scene.add(coronaParticles);
+        }
+
+        // ==================== 创建行星 ====================
+        function createPlanets() {
+            planetData.forEach((data, index) => {
+                // 创建程序化纹理
+                const texture = createProceduralTexture(data.color);
+
+                // 行星几何体
+                const geometry = new THREE.SphereGeometry(data.radius, 32, 32);
+                const material = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    roughness: 0.8,
+                    metalness: 0.2
+                });
+
+                const planet = new THREE.Mesh(geometry, material);
+                
+                // 创建轨道组（用于公转）
+                const orbitGroup = new THREE.Group();
+                orbitGroup.add(planet);
+                
+                // 设置初始位置
+                planet.position.x = data.distance;
+
+                // 创建轨道线
+                const orbitCurve = new THREE.EllipseCurve(
+                    0, 0,
+                    data.distance, data.distance,
+                    0, 2 * Math.PI,
+                    false,
+                    0
+                );
+                const orbitPoints = orbitCurve.getPoints(128);
+                const orbitGeometry = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+                const orbitMaterial = new THREE.LineBasicMaterial({ 
+                    color: 0x4fc3f7, 
+                    transparent: true, 
+                    opacity: 0.2 
+                });
+                const orbitLine = new THREE.LineLoop(orbitGeometry, orbitMaterial);
+                orbitLine.rotation.x = Math.PI / 2;
+                scene.add(orbitLine);
+
+                // 土星光环
+                if (data.hasRing) {
+                    const ringGeometry = new THREE.RingGeometry(
+                        data.radius * 1.4, 
+                        data.radius * 2.2, 
+                        64
+                    );
+                    const ringMaterial = new THREE.MeshBasicMaterial({
+                        color: 0xc9b896,
+                        side: THREE.DoubleSide,
+                        transparent: true,
+                        opacity: 0.6
+                    });
+                    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+                    ring.rotation.x = Math.PI / 2;
+                    planet.add(ring);
+                }
+
+                // 创建行星标签
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'planet-label';
+                labelDiv.textContent = data.name;
+                labelDiv.id = `label-${data.nameEn}`;
+                document.getElementById('labels-container').appendChild(labelDiv);
+                
+                const label = new CSS2DObject(labelDiv);
+                label.position.set(0, data.radius + 1, 0);
+                planet.add(label);
+                labels[data.nameEn] = labelDiv;
+
+                // 存储行星数据
+                planets.push({
+                    mesh: planet,
+                    orbitGroup: orbitGroup,
+                    data: data,
+                    angle: Math.random() * Math.PI * 2 // 随机初始角度
+                });
+
+                scene.add(orbitGroup);
+            });
+        }
+
+        // ==================== 创建程序化纹理 ====================
+        function createProceduralTexture(baseColor) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+
+            // 填充底色
+            const color = new THREE.Color(baseColor);
+            ctx.fillStyle = `rgb(${color.r * 255}, ${color.g * 255}, ${color.b * 255})`;
+            ctx.fillRect(0, 0, 256, 256);
+
+            // 添加简单噪点/色带
+            for (let i = 0; i < 50; i++) {
+                const y = Math.random() * 256;
+                const height = Math.random() * 20 + 5;
+                const alpha = Math.random() * 0.3 + 0.1;
+                
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.fillRect(0, y, 256, height);
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+
+        // ==================== 创建小行星带 ====================
+        function createAsteroidBelt() {
+            if (performanceMode) return; // 性能模式下跳过
+
+            const particleCount = 400;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 28 + Math.random() * 5; // 火星和木星之间
+                const y = (Math.random() - 0.5) * 2;
+
+                positions[i * 3] = Math.cos(angle) * radius;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = Math.sin(angle) * radius;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const material = new THREE.PointsMaterial({
+                color: 0x888888,
+                size: 0.2,
+                transparent: true,
+                opacity: 0.6
+            });
+
+            asteroidBelt = new THREE.Points(geometry, material);
+            scene.add(asteroidBelt);
+        }
+
+        // ==================== 创建星空背景 ====================
+        function createStarField() {
+            const particleCount = performanceMode ? 1000 : 2000;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount; i++) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const radius = 400;
+
+                positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+                positions[i * 3 + 2] = radius * Math.cos(phi);
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const material = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.5,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            starField = new THREE.Points(geometry, material);
+            scene.add(starField);
+        }
+
+        // ==================== 动画循环 ====================
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = 0.01 * speedMultiplier;
+
+            // 更新行星位置（公转和自转）
+            planets.forEach(planet => {
+                // 公转
+                planet.angle += delta * planet.data.speed;
+                planet.mesh.position.x = Math.cos(planet.angle) * planet.data.distance;
+                planet.mesh.position.z = Math.sin(planet.angle) * planet.data.distance;
+
+                // 自转
+                planet.mesh.rotation.y += delta * 0.5;
+            });
+
+            // 更新日冕粒子旋转
+            if (coronaParticles) {
+                coronaParticles.rotation.y += delta * 0.2;
+            }
+
+            // 更新小行星带旋转
+            if (asteroidBelt) {
+                asteroidBelt.rotation.y += delta * 0.05;
+            }
+
+            // 更新控制器
+            controls.update();
+
+            // 渲染
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+
+        // ==================== 鼠标移动事件 ====================
+        function onMouseMove(event) {
+            // 计算鼠标位置（归一化设备坐标）
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // 射线检测
+            raycaster.setFromCamera(mouse, camera);
+            
+            const planetMeshes = planets.map(p => p.mesh);
+            const intersects = raycaster.intersectObjects(planetMeshes);
+
+            // 恢复之前悬停的行星
+            if (hoveredPlanet && (!intersects.length || intersects[0].object !== hoveredPlanet)) {
+                resetPlanetHighlight(hoveredPlanet);
+                hideLabel(hoveredPlanet);
+                hoveredPlanet = null;
+            }
+
+            // 高亮新悬停的行星
+            if (intersects.length > 0) {
+                const intersectedObject = intersects[0].object;
+                if (intersectedObject !== hoveredPlanet) {
+                    highlightPlanet(intersectedObject);
+                    showLabel(intersectedObject);
+                    hoveredPlanet = intersectedObject;
+                }
+            }
+        }
+
+        // ==================== 高亮行星 ====================
+        function highlightPlanet(mesh) {
+            if (mesh.material) {
+                mesh.material.emissiveIntensity = 0.5;
+            }
+        }
+
+        // ==================== 重置行星高亮 ====================
+        function resetPlanetHighlight(mesh) {
+            if (mesh.material) {
+                mesh.material.emissiveIntensity = 0;
+            }
+        }
+
+        // ==================== 显示标签 ====================
+        function showLabel(mesh) {
+            const planet = planets.find(p => p.mesh === mesh);
+            if (planet) {
+                const label = labels[planet.data.nameEn];
+                if (label) {
+                    label.classList.add('visible');
+                }
+            }
+        }
+
+        // ==================== 隐藏标签 ====================
+        function hideLabel(mesh) {
+            const planet = planets.find(p => p.mesh === mesh);
+            if (planet) {
+                const label = labels[planet.data.nameEn];
+                if (label) {
+                    label.classList.remove('visible');
+                }
+            }
+        }
+
+        // ==================== 点击事件 ====================
+        function onClick(event) {
+            if (event.target.classList.contains('control-btn') || 
+                event.target.classList.contains('close-btn')) {
+                return;
+            }
+
+            raycaster.setFromCamera(mouse, camera);
+            const planetMeshes = planets.map(p => p.mesh);
+            const intersects = raycaster.intersectObjects(planetMeshes);
+
+            if (intersects.length > 0) {
+                const intersectedObject = intersects[0].object;
+                const planet = planets.find(p => p.mesh === intersectedObject);
+                if (planet) {
+                    showInfoPanel(planet.data);
+                }
+            } else {
+                closeInfoPanel();
+            }
+        }
+
+        // ==================== 显示信息面板 ====================
+        function showInfoPanel(data) {
+            document.getElementById('planet-name').textContent = `${data.name} (${data.nameEn})`;
+            document.getElementById('planet-info').textContent = data.info;
+            document.getElementById('info-panel').classList.add('active');
+        }
+
+        // ==================== 关闭信息面板 ====================
+        function closeInfoPanel() {
+            document.getElementById('info-panel').classList.remove('active');
+        }
+
+        // ==================== 重置视角 ====================
+        function resetCamera() {
+            camera.position.set(0, 50, 80);
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+
+        // ==================== 改变速度 ====================
+        function changeSpeed(multiplier) {
+            speedMultiplier *= multiplier;
+            speedMultiplier = Math.max(0.1, Math.min(5.0, speedMultiplier));
+        }
+
+        // ==================== 窗口大小调整 ====================
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ==================== FPS 计数器 ====================
+        function updateFPS() {
+            let lastTime = performance.now();
+            let frames = 0;
+            
+            function countFPS() {
+                frames++;
+                const currentTime = performance.now();
+                
+                if (currentTime >= lastTime + 1000) {
+                    document.getElementById('fps-counter').textContent = `FPS: ${frames}`;
+                    frames = 0;
+                    lastTime = currentTime;
+                }
+                
+                requestAnimationFrame(countFPS);
+            }
+            
+            countFPS();
+        }
+
+        // ==================== 暴露全局函数 ====================
+        window.closeInfoPanel = closeInfoPanel;
+        window.resetCamera = resetCamera;
+        window.changeSpeed = changeSpeed;
+
+        // ==================== 启动应用 ====================
+        init();
+    </script>
+</body>
+</html>
